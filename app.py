@@ -28,6 +28,10 @@ if "agent" not in st.session_state:
 if "processing" not in st.session_state:
     st.session_state.processing = False
 
+if "session_id" not in st.session_state:
+    import uuid
+    st.session_state.session_id = str(uuid.uuid4())
+
 # Sidebar with configuration section
 with st.sidebar:
     # Add logo at the top
@@ -74,6 +78,33 @@ with st.sidebar:
         index=0,
         help="Choose the video generation model"
     )
+    
+    st.markdown("---")
+    st.markdown("### 💬 Session Memory")
+    
+    # Show session ID (truncated for display)
+    session_display = st.session_state.session_id[:8] + "..."
+    st.markdown(f"**Session:** `{session_display}`")
+    
+    # Show conversation count
+    if st.session_state.agent:
+        try:
+            history = st.session_state.agent.get_conversation_history()
+            conversation_count = len([msg for msg in history if msg["role"] == "user"])
+            st.markdown(f"**Messages:** {conversation_count} conversations")
+        except:
+            st.markdown("**Messages:** 0 conversations")
+    else:
+        st.markdown("**Messages:** 0 conversations")
+    
+    # Clear memory button
+    if st.button("🧹 Clear Memory"):
+        if st.session_state.agent:
+            st.session_state.agent.clear_memory()
+            st.success("Memory cleared!")
+            st.rerun()
+        else:
+            st.info("No agent to clear memory from")
     
     # st.markdown("---")
     # st.markdown("### 🔑 API Status")
@@ -164,7 +195,8 @@ if prompt:
                     agent_config = {
                         "model_name": "gpt-4o",  # Map from UI selection if needed
                         "temperature": 0.7,
-                        "verbose": True
+                        "verbose": True,
+                        "session_key": st.session_state.session_id
                     }
                     st.session_state.agent = create_pixora_agent(agent_config)
                     st.success("✅ Pixora AI Agent initialized!")

@@ -8,10 +8,15 @@ from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import HumanMessage, AIMessage
+from langchain_community.chat_message_histories import StreamlitChatMessageHistory
 from dotenv import load_dotenv
 
 # Import our custom tools
 from tools.scene_breakdown import scene_breakdown_tool
+from tools.image_generation import generate_scene_images_tool, regenerate_scene_images_tool
+
+# Import prompts
+from config.prompts import AGENT_SYSTEM_PROMPT, ENHANCED_INPUT_TEMPLATE
 
 # Load environment variables
 load_dotenv()
@@ -22,7 +27,7 @@ class PixoraVideoAgent:
     Main ReACT agent for video generation pipeline
     """
     
-    def __init__(self, model_name: str = "gpt-4o", temperature: float = 0.7, verbose: bool = True):
+    def __init__(self, model_name: str = "gpt-4o", temperature: float = 0.7, verbose: bool = True, session_key: str = "default"):
         """
         Initialize the Pixora Video Agent
         
@@ -30,10 +35,12 @@ class PixoraVideoAgent:
             model_name: OpenAI model to use for reasoning
             temperature: Temperature for LLM responses
             verbose: Whether to show detailed reasoning steps
+            session_key: Unique key for this session's memory
         """
         self.model_name = model_name
         self.temperature = temperature
         self.verbose = verbose
+        self.session_key = session_key
         
         # Initialize LLM
         self.llm = ChatOpenAI(
@@ -42,17 +49,22 @@ class PixoraVideoAgent:
             openai_api_key=os.getenv("OPENAI_API_KEY")
         )
         
-        # Initialize memory for conversation history
+        # Initialize Streamlit-specific chat message history
+        self.chat_history = StreamlitChatMessageHistory(key=f"chat_messages_{session_key}")
+        
+        # Initialize memory for conversation history with Streamlit integration
         self.memory = ConversationBufferMemory(
             memory_key="chat_history",
-            return_messages=True
+            return_messages=True,
+            chat_memory=self.chat_history
         )
         
         # Define available tools
         self.tools = [
             scene_breakdown_tool,
+            generate_scene_images_tool,
+            regenerate_scene_images_tool,
             # Additional tools will be added here:
-            # - image_generation_tool
             # - video_animation_tool  
             # - video_merging_tool
         ]
@@ -73,59 +85,17 @@ class PixoraVideoAgent:
             tools=self.tools,
             memory=self.memory,
             verbose=verbose,
-            handle_parsing_errors=True,
-            max_iterations=10,
-            max_execution_time=300  # 5 minutes timeout
+            handle_parsing_errors="Check your output and make sure to follow the format! Always end with either Action: or Final Answer:",
+            max_iterations=8,  # Reduced to prevent infinite loops
+            max_execution_time=300,  # 5 minutes timeout
+            early_stopping_method="force"  # Stop early if possible
         )
     
     def _create_react_prompt(self) -> PromptTemplate:
         """
         Create a custom ReACT prompt template for video generation
         """
-        template = """You are Pixora, an AI video generation agent specializing in creating engaging marketing videos from product images.
-
-You have access to the following tools:
-{tools}
-
-Your expertise includes:
-- Analyzing product images and understanding their marketing potential
-- Creating compelling scene breakdowns for video narratives
-- Coordinating image enhancement and video animation
-- Ensuring brand consistency and visual appeal
-
-WORKFLOW APPROACH:
-1. First understand the user's request and analyze any provided images
-2. Create a structured scene breakdown using the scene_breakdown_tool with proper parameters:
-   - user_prompt: The user's video request
-   - image_paths: List of uploaded image paths (or null if none provided)
-   - aspect_ratio: From configuration (e.g., "9:16", "1:1")
-   - duration_preference: From configuration (e.g., "30sec", "1min")
-3. Present the plan to the user for approval before proceeding
-4. Execute image enhancement and video generation (tools to be implemented)
-5. Provide final video with clear delivery information
-
-COMMUNICATION STYLE:
-- Be professional yet friendly and creative
-- Explain your reasoning clearly at each step
-- Ask for user confirmation before major processing steps
-- Provide progress updates during long operations
-
-Use the following format:
-
-Question: the input question you must answer
-Thought: you should always think about what to do
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the final answer
-Final Answer: the final answer to the original input question
-
-Previous conversation:
-{chat_history}
-
-Question: {input}
-Thought: {agent_scratchpad}"""
+        template = AGENT_SYSTEM_PROMPT
 
         return PromptTemplate(
             input_variables=["input", "chat_history", "agent_scratchpad"],
@@ -150,53 +120,90 @@ Thought: {agent_scratchpad}"""
             Dictionary containing the agent's response and any generated content
         """
         
+        # Store image paths and config in environment variables so tools can access them
+        if image_paths:
+            os.environ["PIXORA_IMAGE_PATHS"] = str(image_paths)
+        else:
+            os.environ.pop("PIXORA_IMAGE_PATHS", None)
+            
+        if config:
+            os.environ["PIXORA_ASPECT_RATIO"] = config.get('aspect_ratio', '16:9')
+            os.environ["PIXORA_DURATION"] = config.get('duration', '30sec')
+            os.environ["PIXORA_IMAGE_MODEL"] = config.get('image_model', 'Kontext')
+        else:
+            os.environ.pop("PIXORA_ASPECT_RATIO", None)
+            os.environ.pop("PIXORA_DURATION", None)
+            os.environ.pop("PIXORA_IMAGE_MODEL", None)
+        
         # Prepare the enhanced input with context
         enhanced_input = self._prepare_enhanced_input(user_input, image_paths, config)
         
         try:
+            # Add user message to chat history
+            self.chat_history.add_user_message(user_input)
+            
             # Execute the agent
             result = self.agent_executor.invoke({
                 "input": enhanced_input
             })
             
+            # Get the agent's response
+            agent_response = result.get("output", "")
+            
+            # Add agent response to chat history
+            self.chat_history.add_ai_message(agent_response)
+            
             return {
                 "success": True,
-                "response": result.get("output", ""),
-                "chat_history": self.memory.chat_memory.messages,
+                "response": agent_response,
+                "chat_history": self.chat_history.messages,
                 "intermediate_steps": result.get("intermediate_steps", [])
             }
             
         except Exception as e:
+            error_response = f"I encountered an error while processing your request: {str(e)}"
+            
+            # Still add the error response to chat history
+            self.chat_history.add_ai_message(error_response)
+            
             return {
                 "success": False,
                 "error": str(e),
-                "response": f"I encountered an error while processing your request: {str(e)}",
-                "chat_history": self.memory.chat_memory.messages
+                "response": error_response,
+                "chat_history": self.chat_history.messages
             }
+        finally:
+            # Clean up environment variables
+            for key in ["PIXORA_IMAGE_PATHS", "PIXORA_ASPECT_RATIO", "PIXORA_DURATION", "PIXORA_IMAGE_MODEL"]:
+                os.environ.pop(key, None)
     
     def _prepare_enhanced_input(self, user_input: str, image_paths: Optional[List[str]] = None,
                                config: Optional[Dict[str, Any]] = None) -> str:
         """
-        Enhance user input with additional context
+        Enhance user input with additional context using template
         """
-        enhanced_parts = [f"User Request: {user_input}"]
-        
+        # Prepare image info
+        image_info = ""
         if image_paths:
-            enhanced_parts.append(f"Uploaded Images: {len(image_paths)} images provided")
-            enhanced_parts.append(f"Image paths: {image_paths}")
+            image_info = f"Uploaded Images: {len(image_paths)} images provided\nImage paths: {image_paths}"
         
-        if config:
-            config_str = ", ".join([f"{k}: {v}" for k, v in config.items()])
-            enhanced_parts.append(f"Configuration: {config_str}")
-        
-        return "\n\n".join(enhanced_parts)
+        # Use template for consistent formatting
+        return ENHANCED_INPUT_TEMPLATE.format(
+            user_input=user_input,
+            image_info=image_info,
+            aspect_ratio=config.get('aspect_ratio', '16:9') if config else '16:9',
+            duration=config.get('duration', '30sec') if config else '30sec',
+            llm_model=config.get('llm_model', 'GPT-4.0') if config else 'GPT-4.0',
+            image_model=config.get('image_model', 'Kontext') if config else 'Kontext',
+            video_model=config.get('video_model', 'Kling 1.6') if config else 'Kling 1.6'
+        )
     
     def get_conversation_history(self) -> List[Dict[str, str]]:
         """
         Get formatted conversation history
         """
         history = []
-        for message in self.memory.chat_memory.messages:
+        for message in self.chat_history.messages:
             if isinstance(message, HumanMessage):
                 history.append({"role": "user", "content": message.content})
             elif isinstance(message, AIMessage):
@@ -205,6 +212,7 @@ Thought: {agent_scratchpad}"""
     
     def clear_memory(self):
         """Clear conversation memory"""
+        self.chat_history.clear()
         self.memory.clear()
     
     def add_tool(self, tool):
