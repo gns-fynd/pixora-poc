@@ -14,8 +14,7 @@ load_dotenv()
 st.set_page_config(
     page_title="Pixora Chatbot",
     page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="collapsed"
+    layout="wide"
 )
 
 # Initialize session state for chat history and agent
@@ -37,74 +36,47 @@ with st.sidebar:
     # Add logo at the top
     st.image("logo.png", width=200)
     
-    st.markdown("### Configuration")
-    
-    # Aspect ratio dropdown
-    aspect_ratio = st.selectbox(
-        "Aspect Ratio",
-        ["1:1", "9:16"],
-        index=0,
-        help="Choose the aspect ratio for generated content"
-    )
-    
-    # Duration dropdown
-    duration = st.selectbox(
-        "Duration",
-        ["10sec", "30sec", "1min"],
-        index=0,
-        help="Choose the duration for video content"
-    )
-    
-    # LLM selection dropdown
-    llm_option = st.selectbox(
-        "LLM",
-        ["GPT-4.0", "GPT-5 Thinking", "GPT-4.5", "Claude 4 Sonnet", "Gemini 2.5 Pro"],
-        index=0,
-        help="Choose the AI language model"
-    )
-    
-    # Image model dropdown
-    image_option = st.selectbox(
-        "Image",
-        ["Kontext", "Nano Banana 🍌"],
-        index=0,
-        help="Choose the image generation model"
-    )
-    
-    # Video model dropdown
-    video_option = st.selectbox(
-        "Video",
-        ["Kling 1.6", "Kling 2.1", "Veo 3"],
-        index=0,
-        help="Choose the video generation model"
-    )
-    
-    st.markdown("---")
-    st.markdown("### 💬 Session Memory")
-    
-    # Show session ID (truncated for display)
-    session_display = st.session_state.session_id[:8] + "..."
-    st.markdown(f"**Session:** `{session_display}`")
-    
-    # Show conversation count
-    if st.session_state.agent:
-        try:
-            history = st.session_state.agent.get_conversation_history()
-            conversation_count = len([msg for msg in history if msg["role"] == "user"])
-            st.markdown(f"**Messages:** {conversation_count} conversations")
-        except:
-            st.markdown("**Messages:** 0 conversations")
-    else:
-        st.markdown("**Messages:** 0 conversations")
-    
-    # Clear memory button
-    if st.button("🧹 Clear Memory"):
-        if st.session_state.agent:
-            st.session_state.agent.clear_memory()
-            st.success("Memory cleared!")
-            st.rerun()
-        else:
-            st.info("No agent to clear memory from")
+    # Make Configuration section collapsible
+    with st.expander("⚙️ Configuration", expanded=True):
+        # Aspect ratio dropdown
+        aspect_ratio = st.selectbox(
+            "Aspect Ratio",
+            ["1:1", "9:16"],
+            index=0,
+            help="Choose the aspect ratio for generated content"
+        )
+        
+        # Duration dropdown
+        duration = st.selectbox(
+            "Duration",
+            ["10sec", "30sec", "1min"],
+            index=0,
+            help="Choose the duration for video content"
+        )
+        
+        # LLM selection dropdown
+        llm_option = st.selectbox(
+            "LLM",
+            ["GPT-4.0", "GPT-5 Thinking", "GPT-4.5", "Claude 4 Sonnet", "Gemini 2.5 Pro"],
+            index=0,
+            help="Choose the AI language model"
+        )
+        
+        # Image model dropdown
+        image_option = st.selectbox(
+            "Image",
+            ["Kontext", "Nano Banana 🍌"],
+            index=0,
+            help="Choose the image generation model"
+        )
+        
+        # Video model dropdown
+        video_option = st.selectbox(
+            "Video",
+            ["Kling 1.6", "Kling 2.1", "Veo 3"],
+            index=0,
+            help="Choose the video generation model"
+        )
     
     # st.markdown("---")
     # st.markdown("### 🔑 API Status")
@@ -130,15 +102,26 @@ with st.sidebar:
 # Display chat messages
 chat_container = st.container()
 with chat_container:
-    for message in st.session_state.messages:
+    for i, message in enumerate(st.session_state.messages):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             
             # Display attached files if any
             if "files" in message and message["files"]:
-                st.markdown("**Attached files:**")
-                for file_info in message["files"]:
-                    st.markdown(f"📎 {file_info['name']} ({file_info['size']} bytes)")
+                # Separate image files from other files for display
+                image_files = [f for f in message["files"] if f.get("type", "").startswith("image/")]
+                other_files = [f for f in message["files"] if not f.get("type", "").startswith("image/")]
+                
+                if image_files or other_files:
+                    st.markdown("**Attached files:**")
+                    
+                    # For image files, show them in a compact horizontal layout
+                    if image_files:
+                        st.markdown(f"📷 {len(image_files)} image(s): " + ", ".join([f["name"] for f in image_files]))
+                    
+                    # For other files, show them normally
+                    for file_info in other_files:
+                        st.markdown(f"📎 {file_info['name']} ({file_info['size']} bytes)")
 
 # Chat input with built-in file attachment support
 prompt = st.chat_input(
@@ -177,11 +160,35 @@ if prompt:
         if user_text:
             st.markdown(user_text)
         if user_files:
-            st.markdown("**Attached files:**")
-            for file in user_files:
-                if file.type and file.type.startswith("image/"):
-                    st.image(Image.open(io.BytesIO(file.getbuffer())))
-                else:
+            # Separate image files from other files
+            image_files = [f for f in user_files if f.type and f.type.startswith("image/")]
+            other_files = [f for f in user_files if not (f.type and f.type.startswith("image/"))]
+            
+            # Display images horizontally if any
+            if image_files:
+                st.markdown("**Attached files:**")
+                
+                # Display images horizontally
+                num_images = len(image_files)
+                images_per_row = min(4, num_images)  # Max 4 images per row
+                
+                for row_start in range(0, num_images, images_per_row):
+                    row_images = image_files[row_start:row_start + images_per_row]
+                    cols = st.columns(len(row_images))
+                    
+                    for i, file in enumerate(row_images):
+                        with cols[i]:
+                            st.image(
+                                Image.open(io.BytesIO(file.getbuffer())), 
+                                width=180,
+                                caption=file.name
+                            )
+            
+            # Display other files
+            if other_files:
+                if not image_files:  # Only show "Attached files:" if we haven't shown it for images
+                    st.markdown("**Attached files:**")
+                for file in other_files:
                     st.write(f"📎 {file.name} · {file.type or 'unknown'} · {len(file.getbuffer())} bytes")
     
     # Generate and display assistant response
@@ -238,6 +245,41 @@ if prompt:
                     
                     if result["success"]:
                         response_content = result["response"]
+                        
+                        # Check for extracted images in intermediate steps and display them
+                        if result.get("intermediate_steps"):
+                            for i, (action, observation) in enumerate(result["intermediate_steps"]):
+                                # Check if this step involved image extraction
+                                if "extract_pdp_images_tool" in str(action):
+                                    try:
+                                        import json
+                                        obs_data = json.loads(observation)
+                                        if obs_data.get("success") and obs_data.get("display_images"):
+                                            st.markdown("### 🖼️ Extracted Images")
+                                            st.markdown(f"Found {len(obs_data['display_images'])} images from the provided URLs:")
+                                            
+                                            # Display extracted images horizontally
+                                            display_images = obs_data['display_images']
+                                            num_images = len(display_images)
+                                            images_per_row = min(4, num_images)
+                                            
+                                            for row_start in range(0, num_images, images_per_row):
+                                                row_images = display_images[row_start:row_start + images_per_row]
+                                                cols = st.columns(len(row_images))
+                                                
+                                                for j, img_data in enumerate(row_images):
+                                                    with cols[j]:
+                                                        # Display image from base64
+                                                        st.image(
+                                                            img_data['base64'],
+                                                            width=180,
+                                                            caption=f"Image {row_start + j + 1}"
+                                                        )
+                                                        st.caption(f"Source: {img_data['source']}")
+                                            
+                                            st.markdown("---")
+                                    except:
+                                        pass  # Skip if parsing fails
                         
                         # Show intermediate steps if available
                         if result.get("intermediate_steps"):

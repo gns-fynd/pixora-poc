@@ -14,3 +14,4 @@ __all__ = [
     "IMAGE_ANALYSIS_PROMPT",
     "ENHANCED_INPUT_TEMPLATE"
 ]
+

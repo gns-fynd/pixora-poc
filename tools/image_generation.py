@@ -82,38 +82,13 @@ class NanoBananaModel(ImageModel):
         return str(result)
 
 
-class KontextModel(ImageModel):
-    """Kontext Pro model implementation (placeholder - need actual model details)"""
-    
-    def __init__(self):
-        # Note: This is a placeholder - need actual Kontext model ID and parameters
-        super().__init__(
-            model_id="kontext/pro:placeholder_version_hash",  # Replace with actual model
-            default_params={
-                "width": 1024,
-                "height": 1024,
-                "num_inference_steps": 20,
-                "guidance_scale": 7.5
-            }
-        )
-    
-    def generate_image(self, prompt: str, **kwargs) -> str:
-        """Generate image using Kontext Pro"""
-        params = self.prepare_params(prompt, **kwargs)
-        
-        # For now, fallback to Nano Banana since we don't have actual Kontext model
-        # TODO: Replace with actual Kontext implementation when available
-        fallback_model = NanoBananaModel()
-        return fallback_model.generate_image(prompt, **kwargs)
-
-
 # Model registry for easy extension
 MODEL_REGISTRY = {
     "nano-banana": NanoBananaModel,
-    "kontext": KontextModel,
     # Future models can be added here:
     # "flux": FluxModel,
     # "sdxl": SDXLModel,
+    # "kontext": KontextModel,  # Removed - not working
 }
 
 
@@ -265,20 +240,31 @@ def generate_scene_images_tool(
         
         print(f"DEBUG - Parsed scene_data keys: {list(scene_data.keys())}")
         
-        # Handle nested structure - scenes might be inside scene_breakdown_json key
-        if "scene_breakdown_json" in scene_data and isinstance(scene_data["scene_breakdown_json"], dict):
-            # Extract the actual breakdown from nested structure
+        # Handle different possible structures
+        scenes = []
+        image_paths = None
+        
+        # Check for direct structure first
+        if "scenes" in scene_data:
+            scenes = scene_data.get("scenes", [])
+            image_paths = scene_data.get("image_paths", None)
+            print(f"DEBUG - Found scenes in direct structure: {len(scenes)} scenes")
+            print(f"DEBUG - Found image_paths in direct structure: {image_paths}")
+        
+        # Check for nested structure (from agent tool calls)
+        elif "scene_breakdown_json" in scene_data and isinstance(scene_data["scene_breakdown_json"], dict):
             actual_breakdown = scene_data["scene_breakdown_json"]
             scenes = actual_breakdown.get("scenes", [])
             image_paths = actual_breakdown.get("image_paths", None)
             print(f"DEBUG - Found scenes in nested structure: {len(scenes)} scenes")
             print(f"DEBUG - Found image_paths in nested structure: {image_paths}")
-        else:
-            # Direct structure
+        
+        # Handle case where the entire input is the breakdown
+        elif isinstance(scene_data, dict) and all(key in scene_data for key in ["total_scenes", "scenes"]):
             scenes = scene_data.get("scenes", [])
             image_paths = scene_data.get("image_paths", None)
-            print(f"DEBUG - Found scenes in direct structure: {len(scenes)} scenes")
-            print(f"DEBUG - Found image_paths in direct structure: {image_paths}")
+            print(f"DEBUG - Input is direct breakdown: {len(scenes)} scenes")
+            print(f"DEBUG - Found image_paths in breakdown: {image_paths}")
         
         print(f"DEBUG - Found {len(scenes)} scenes")
         
@@ -352,7 +338,7 @@ def regenerate_scene_images_tool(
         scene_breakdown_json: Original scene breakdown JSON
         model_name: Image generation model to use
         aspect_ratio: Aspect ratio for images
-        custom_prompts: Optional custom prompts for specific scenes {scene_id: new_prompt}
+        custom_prompts: Optional custom prompts for specific scenes (dict mapping scene_id to new_prompt)
     
     Returns:
         JSON string containing regeneration results

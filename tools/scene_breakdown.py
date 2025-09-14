@@ -149,13 +149,14 @@ def scene_breakdown_tool(
         except Exception as e:
             print(f"WARNING - Could not parse image_paths from environment: {e}")
     
-    if env_aspect_ratio:
+    # Only override if environment variables are provided AND different from user input
+    if env_aspect_ratio and env_aspect_ratio != aspect_ratio:
+        print(f"DEBUG - Environment override: aspect_ratio from {aspect_ratio} to {env_aspect_ratio}")
         aspect_ratio = env_aspect_ratio
-        print(f"DEBUG - Using aspect_ratio from environment: {aspect_ratio}")
     
-    if env_duration:
+    if env_duration and env_duration != duration_preference:
+        print(f"DEBUG - Environment override: duration_preference from {duration_preference} to {env_duration}")
         duration_preference = env_duration
-        print(f"DEBUG - Using duration_preference from environment: {duration_preference}")
     
     print(f"DEBUG - After override: aspect_ratio={aspect_ratio}, duration={duration_preference}")
     

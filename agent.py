@@ -14,6 +14,9 @@ from dotenv import load_dotenv
 # Import our custom tools
 from tools.scene_breakdown import scene_breakdown_tool
 from tools.image_generation import generate_scene_images_tool, regenerate_scene_images_tool
+from tools.video_generation import generate_scene_videos_tool, regenerate_scene_videos_tool
+from tools.video_merging import merge_videos_tool, regenerate_and_merge_videos_tool
+from tools.pdp_image_extraction import extract_pdp_images_tool
 
 # Import prompts
 from config.prompts import AGENT_SYSTEM_PROMPT, ENHANCED_INPUT_TEMPLATE
@@ -45,8 +48,7 @@ class PixoraVideoAgent:
         # Initialize LLM
         self.llm = ChatOpenAI(
             model=model_name,
-            temperature=temperature,
-            openai_api_key=os.getenv("OPENAI_API_KEY")
+            temperature=temperature
         )
         
         # Initialize Streamlit-specific chat message history
@@ -61,12 +63,14 @@ class PixoraVideoAgent:
         
         # Define available tools
         self.tools = [
+            extract_pdp_images_tool,
             scene_breakdown_tool,
             generate_scene_images_tool,
             regenerate_scene_images_tool,
-            # Additional tools will be added here:
-            # - video_animation_tool  
-            # - video_merging_tool
+            generate_scene_videos_tool,
+            regenerate_scene_videos_tool,
+            merge_videos_tool,
+            regenerate_and_merge_videos_tool,
         ]
         
         # Create the ReACT prompt template
@@ -86,9 +90,9 @@ class PixoraVideoAgent:
             memory=self.memory,
             verbose=verbose,
             handle_parsing_errors="Check your output and make sure to follow the format! Always end with either Action: or Final Answer:",
-            max_iterations=8,  # Reduced to prevent infinite loops
-            max_execution_time=300,  # 5 minutes timeout
-            early_stopping_method="force"  # Stop early if possible
+            max_iterations=15,  # Reduced to prevent infinite loops
+            max_execution_time=1000,  # 5 minutes timeout
+            early_stopping_method="generate"  # Stop early if possible
         )
     
     def _create_react_prompt(self) -> PromptTemplate:
@@ -129,11 +133,13 @@ class PixoraVideoAgent:
         if config:
             os.environ["PIXORA_ASPECT_RATIO"] = config.get('aspect_ratio', '16:9')
             os.environ["PIXORA_DURATION"] = config.get('duration', '30sec')
-            os.environ["PIXORA_IMAGE_MODEL"] = config.get('image_model', 'Kontext')
+            os.environ["PIXORA_IMAGE_MODEL"] = config.get('image_model', 'nano-banana')
+            os.environ["PIXORA_VIDEO_MODEL"] = config.get('video_model', 'kling-v2')
         else:
             os.environ.pop("PIXORA_ASPECT_RATIO", None)
             os.environ.pop("PIXORA_DURATION", None)
             os.environ.pop("PIXORA_IMAGE_MODEL", None)
+            os.environ.pop("PIXORA_VIDEO_MODEL", None)
         
         # Prepare the enhanced input with context
         enhanced_input = self._prepare_enhanced_input(user_input, image_paths, config)
@@ -174,7 +180,7 @@ class PixoraVideoAgent:
             }
         finally:
             # Clean up environment variables
-            for key in ["PIXORA_IMAGE_PATHS", "PIXORA_ASPECT_RATIO", "PIXORA_DURATION", "PIXORA_IMAGE_MODEL"]:
+            for key in ["PIXORA_IMAGE_PATHS", "PIXORA_ASPECT_RATIO", "PIXORA_DURATION", "PIXORA_IMAGE_MODEL", "PIXORA_VIDEO_MODEL"]:
                 os.environ.pop(key, None)
     
     def _prepare_enhanced_input(self, user_input: str, image_paths: Optional[List[str]] = None,
