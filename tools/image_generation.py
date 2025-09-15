@@ -66,19 +66,29 @@ class NanoBananaModel(ImageModel):
     def generate_image(self, prompt: str, **kwargs) -> str:
         """Generate image using Nano Banana"""
         params = self.prepare_params(prompt, **kwargs)
-        
+
         # Remove any unsupported parameters
-        supported_params = ["prompt", "output_format", "image_input"]
+        supported_params = ["prompt", "output_format", "image_input", "width", "height", "image_size"]
         filtered_params = {k: v for k, v in params.items() if k in supported_params}
-        
+
+        # Convert width/height to image_size if needed
+        if "width" in filtered_params and "height" in filtered_params and "image_size" not in filtered_params:
+            filtered_params["image_size"] = f'{filtered_params["width"]}x{filtered_params["height"]}'
+
         # Debug: Print what we're sending to the model
         print(f"DEBUG - Nano Banana params: {list(filtered_params.keys())}")
         if "image_input" in filtered_params:
             print(f"DEBUG - Using image_input for image-to-image generation")
         else:
             print(f"DEBUG - Using text-to-image generation only")
-        
+
         result = replicate.run(self.model_id, input=filtered_params)
+
+        # Normalize replicate output to a string URL
+        if isinstance(result, (list, tuple)) and result:
+            result = result[0]
+        elif isinstance(result, dict) and "output" in result:
+            result = result["output"]
         return str(result)
 
 

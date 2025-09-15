@@ -15,8 +15,9 @@ from dotenv import load_dotenv
 from tools.scene_breakdown import scene_breakdown_tool
 from tools.image_generation import generate_scene_images_tool, regenerate_scene_images_tool
 from tools.video_generation import generate_scene_videos_tool, regenerate_scene_videos_tool
-from tools.video_merging import merge_videos_tool, regenerate_and_merge_videos_tool
+from tools.video_merging import merge_videos_tool, regenerate_and_merge_videos_tool, merge_videos_with_music_tool
 from tools.pdp_image_extraction import extract_pdp_images_tool
+from tools.music_generation import generate_background_music_tool
 
 # Import prompts
 from config.prompts import AGENT_SYSTEM_PROMPT, ENHANCED_INPUT_TEMPLATE
@@ -71,6 +72,8 @@ class PixoraVideoAgent:
             regenerate_scene_videos_tool,
             merge_videos_tool,
             regenerate_and_merge_videos_tool,
+            merge_videos_with_music_tool,
+            generate_background_music_tool,
         ]
         
         # Create the ReACT prompt template
@@ -129,12 +132,25 @@ class PixoraVideoAgent:
             os.environ["PIXORA_IMAGE_PATHS"] = str(image_paths)
         else:
             os.environ.pop("PIXORA_IMAGE_PATHS", None)
-            
+
         if config:
+            # Normalize model names to ensure consistency
+            def _normalize_model(name: str, mapping: dict, default: str) -> str:
+                if not name:
+                    return default
+                key = name.strip().lower()
+                return mapping.get(key, default)
+
+            image_map = {"nano banana": "nano-banana", "nano-banana": "nano-banana", "kontext": "nano-banana"}
+            video_map = {"kling 1.6": "kling-v2", "kling v2": "kling-v2", "kling-v2": "kling-v2"}
+
+            cfg_image = _normalize_model(config.get('image_model') or '', image_map, 'nano-banana')
+            cfg_video = _normalize_model(config.get('video_model') or '', video_map, 'kling-v2')
+
             os.environ["PIXORA_ASPECT_RATIO"] = config.get('aspect_ratio', '16:9')
             os.environ["PIXORA_DURATION"] = config.get('duration', '30sec')
-            os.environ["PIXORA_IMAGE_MODEL"] = config.get('image_model', 'nano-banana')
-            os.environ["PIXORA_VIDEO_MODEL"] = config.get('video_model', 'kling-v2')
+            os.environ["PIXORA_IMAGE_MODEL"] = cfg_image
+            os.environ["PIXORA_VIDEO_MODEL"] = cfg_video
         else:
             os.environ.pop("PIXORA_ASPECT_RATIO", None)
             os.environ.pop("PIXORA_DURATION", None)
@@ -199,9 +215,9 @@ class PixoraVideoAgent:
             image_info=image_info,
             aspect_ratio=config.get('aspect_ratio', '16:9') if config else '16:9',
             duration=config.get('duration', '30sec') if config else '30sec',
-            llm_model=config.get('llm_model', 'GPT-4.0') if config else 'GPT-4.0',
-            image_model=config.get('image_model', 'Kontext') if config else 'Kontext',
-            video_model=config.get('video_model', 'Kling 1.6') if config else 'Kling 1.6'
+            llm_model=config.get('llm_model', 'gpt-4o') if config else 'gpt-4o',
+            image_model=config.get('image_model', 'nano-banana') if config else 'nano-banana',
+            video_model=config.get('video_model', 'kling-v2') if config else 'kling-v2'
         )
     
     def get_conversation_history(self) -> List[Dict[str, str]]:

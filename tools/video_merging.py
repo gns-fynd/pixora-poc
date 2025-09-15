@@ -13,6 +13,7 @@ import time
 
 # Import image utilities for FAL upload
 from .image_utils import upload_images_to_fal
+from .music_generation import download_music_file
 
 
 class VideoClip(BaseModel):
@@ -35,9 +36,23 @@ class MergedVideoResult(BaseModel):
 
 
 def download_video(url: str, output_path: str) -> bool:
-    """Download video from URL to local path"""
+    """Download video from URL to local path or copy local file"""
     try:
-        print(f"DEBUG - Downloading video from: {url}")
+        print(f"DEBUG - Processing video from: {url}")
+        
+        # Handle local file URLs
+        if url.startswith('file://'):
+            local_path = url.replace('file://', '')
+            if os.path.exists(local_path):
+                import shutil
+                shutil.copy2(local_path, output_path)
+                print(f"DEBUG - Copied local file: {local_path} -> {output_path}")
+                return True
+            else:
+                print(f"ERROR - Local file not found: {local_path}")
+                return False
+        
+        # Handle regular HTTP/HTTPS URLs
         response = requests.get(url, stream=True, timeout=60)
         response.raise_for_status()
 
@@ -135,7 +150,7 @@ def create_ffmpeg_filter(clips: List[VideoClip]) -> str:
 
 
 def merge_videos_ffmpeg(clips: List[VideoClip], output_path: str) -> bool:
-    """Merge videos using FFmpeg with transitions"""
+    """Merge videos using FFmpeg concat demuxer (more reliable approach)"""
     temp_dir = None
     try:
         # Create temporary directory for downloaded clips
@@ -168,74 +183,112 @@ def merge_videos_ffmpeg(clips: List[VideoClip], output_path: str) -> bool:
         print(f"DEBUG - Videos have audio streams: {has_audio}")
         print(f"DEBUG - Video resolutions: {resolutions}")
 
-        # Determine target resolution (use the most common or largest)
-        if len(set(resolutions)) == 1:
-            # All videos have same resolution
-            target_width, target_height = resolutions[0]
-            print(f"DEBUG - All videos have same resolution: {target_width}x{target_height}")
-        else:
-            # Different resolutions - use the most common one
+        # Determine if we need scaling
+        unique_resolutions = set(resolutions)
+        needs_scaling = len(unique_resolutions) > 1
+
+        if needs_scaling:
+            # Use the most common resolution as target
             from collections import Counter
             resolution_counts = Counter(resolutions)
             target_width, target_height = resolution_counts.most_common(1)[0][0]
-            print(f"DEBUG - Mixed resolutions, using most common: {target_width}x{target_height}")
-
-        # Build FFmpeg command
-        cmd = ["ffmpeg", "-y"]  # -y to overwrite output file
-
-        # Handle concatenation using filter_complex (more reliable than concat protocol)
-        if len(clips) == 1:
-            # Single clip, just copy
-            cmd.extend(["-i", local_clips[0]])
-            cmd.extend(["-c", "copy", output_path])
+            print(f"DEBUG - Mixed resolutions, scaling to: {target_width}x{target_height}")
         else:
-            # Multiple clips - use filter_complex with concat and scaling
-            # Add all input files
-            for clip_path in local_clips:
-                cmd.extend(["-i", clip_path])
+            target_width, target_height = resolutions[0]
+            print(f"DEBUG - All videos have same resolution: {target_width}x{target_height}")
 
-            # Build filter_complex string for concatenation with scaling
-            filter_parts = []
-
-            if has_audio:
-                # Include both video and audio streams with scaling
-                for i in range(len(local_clips)):
-                    width, height = resolutions[i]
-                    if width != target_width or height != target_height:
-                        # Scale video to target resolution
-                        filter_parts.append(f"[{i}:v]scale={target_width}:{target_height}[v{i}];")
-                        filter_parts.append(f"[v{i}][{i}:a]")
-                    else:
-                        filter_parts.append(f"[{i}:v][{i}:a]")
-
-                concat_filter = "".join(filter_parts) + f"concat=n={len(local_clips)}:v=1:a=1[v][a]"
-                cmd.extend(["-filter_complex", concat_filter])
-                cmd.extend(["-map", "[v]", "-map", "[a]"])
-                cmd.extend(["-c:v", "libx264", "-c:a", "aac", "-strict", "experimental"])
-            else:
-                # Video-only concatenation with scaling
-                for i in range(len(local_clips)):
-                    width, height = resolutions[i]
-                    if width != target_width or height != target_height:
-                        # Scale video to target resolution
-                        filter_parts.append(f"[{i}:v]scale={target_width}:{target_height}[v{i}];")
-                        filter_parts.append(f"[v{i}]")
-                    else:
-                        filter_parts.append(f"[{i}:v]")
-
-                concat_filter = "".join(filter_parts) + f"concat=n={len(local_clips)}:v=1:a=0[v]"
-                cmd.extend(["-filter_complex", concat_filter])
-                cmd.extend(["-map", "[v]"])
+        # Initialize result variable
+        result = None
+        
+        # Handle single clip case
+        if len(clips) == 1:
+            if needs_scaling:
+                # Scale single clip if needed
+                cmd = ["ffmpeg", "-y", "-i", local_clips[0]]
+                cmd.extend(["-vf", f"scale={target_width}:{target_height}"])
                 cmd.extend(["-c:v", "libx264"])
+                if has_audio:
+                    cmd.extend(["-c:a", "copy"])
+                cmd.append(output_path)
+            else:
+                # Just copy single clip
+                cmd = ["ffmpeg", "-y", "-i", local_clips[0], "-c", "copy", output_path]
+            
+            print(f"DEBUG - Processing single clip: {' '.join(cmd)}")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        else:
+            # Multiple clips - use concat demuxer approach
+            if needs_scaling:
+                # Pre-scale videos that need it, then concatenate
+                scaled_clips = []
+                
+                for i, clip_path in enumerate(local_clips):
+                    width, height = resolutions[i]
+                    if width != target_width or height != target_height:
+                        # Scale this clip
+                        scaled_path = os.path.join(temp_dir, f"scaled_clip_{i}.mp4")
+                        scale_cmd = ["ffmpeg", "-y", "-i", clip_path]
+                        scale_cmd.extend(["-vf", f"scale={target_width}:{target_height}"])
+                        scale_cmd.extend(["-c:v", "libx264"])
+                        if has_audio:
+                            scale_cmd.extend(["-c:a", "copy"])
+                        scale_cmd.append(scaled_path)
+                        
+                        print(f"DEBUG - Scaling clip {i}: {' '.join(scale_cmd)}")
+                        scale_result = subprocess.run(scale_cmd, capture_output=True, text=True, timeout=120)
+                        
+                        if scale_result.returncode != 0:
+                            print(f"ERROR - Failed to scale clip {i}: {scale_result.stderr}")
+                            return False
+                        
+                        scaled_clips.append(scaled_path)
+                        print(f"DEBUG - Scaled clip {i} successfully")
+                    else:
+                        # No scaling needed
+                        scaled_clips.append(clip_path)
+                
+                # Now concatenate the scaled clips
+                concat_list_path = os.path.join(temp_dir, "concat_list.txt")
+                with open(concat_list_path, 'w') as f:
+                    for clip_path in scaled_clips:
+                        # Use relative paths and escape single quotes
+                        f.write(f"file '{os.path.basename(clip_path)}'\n")
+                
+                # Change to temp directory for concat to work with relative paths
+                original_cwd = os.getcwd()
+                os.chdir(temp_dir)
+                
+                try:
+                    cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "concat_list.txt"]
+                    cmd.extend(["-c", "copy", output_path])
+                    
+                    print(f"DEBUG - Concatenating scaled clips: {' '.join(cmd)}")
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+                finally:
+                    os.chdir(original_cwd)
+                    
+            else:
+                # All clips have same resolution - direct concatenation
+                concat_list_path = os.path.join(temp_dir, "concat_list.txt")
+                with open(concat_list_path, 'w') as f:
+                    for clip_path in local_clips:
+                        f.write(f"file '{os.path.basename(clip_path)}'\n")
+                
+                # Change to temp directory for concat
+                original_cwd = os.getcwd()
+                os.chdir(temp_dir)
+                
+                try:
+                    cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", "concat_list.txt"]
+                    cmd.extend(["-c", "copy", output_path])
+                    
+                    print(f"DEBUG - Concatenating clips: {' '.join(cmd)}")
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+                finally:
+                    os.chdir(original_cwd)
 
-            cmd.extend([output_path])
-
-        print(f"DEBUG - Running FFmpeg command: {' '.join(cmd)}")
-
-        # Run FFmpeg
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-
-        if result.returncode == 0:
+        # Check result
+        if result and result.returncode == 0:
             print(f"DEBUG - Video merging successful: {output_path}")
             # Verify output file exists and has content
             if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
@@ -244,8 +297,11 @@ def merge_videos_ffmpeg(clips: List[VideoClip], output_path: str) -> bool:
             else:
                 print(f"ERROR - Output file missing or empty: {output_path}")
                 return False
-        else:
+        elif result:
             print(f"ERROR - FFmpeg failed: {result.stderr}")
+            return False
+        else:
+            print(f"ERROR - No FFmpeg result available")
             return False
 
     except Exception as e:
@@ -401,6 +457,196 @@ def merge_videos_tool(
             success=False,
             total_duration=0,
             total_clips=len(video_clips) if video_clips else 0,
+            processing_time=processing_time,
+            error_message=str(e)
+        )
+        
+        return result.model_dump_json(indent=2)
+
+
+def add_background_music_to_video(video_path: str, music_url: str, output_path: str, music_volume: float = 0.3) -> bool:
+    """Add background music to video using FFmpeg"""
+    temp_dir = None
+    try:
+        # Create temporary directory for music file
+        temp_dir = tempfile.mkdtemp()
+        music_path = os.path.join(temp_dir, "background_music.mp3")
+        
+        # Download music file
+        if not download_music_file(music_url, music_path):
+            print(f"ERROR - Failed to download music from: {music_url}")
+            return False
+        
+        print(f"DEBUG - Adding background music to video")
+        print(f"DEBUG - Video: {video_path}")
+        print(f"DEBUG - Music: {music_path}")
+        print(f"DEBUG - Music volume: {music_volume}")
+        
+        # Check if video has audio streams
+        has_video_audio = detect_audio_streams(video_path)
+        
+        if has_video_audio:
+            # Video has audio - mix with background music
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", video_path,      # Video input
+                "-i", music_path,      # Music input
+                "-filter_complex", f"[1:a]volume={music_volume}[music];[0:a][music]amix=inputs=2:duration=first:dropout_transition=2[audio]",
+                "-map", "0:v",         # Use video from first input
+                "-map", "[audio]",     # Use mixed audio
+                "-c:v", "copy",        # Copy video without re-encoding
+                "-c:a", "aac",         # Encode audio as AAC
+                "-shortest",           # End when shortest input ends
+                output_path
+            ]
+        else:
+            # Video has no audio - just add background music as audio track
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", video_path,      # Video input
+                "-i", music_path,      # Music input
+                "-filter_complex", f"[1:a]volume={music_volume}[audio]",
+                "-map", "0:v",         # Use video from first input
+                "-map", "[audio]",     # Use background music as audio
+                "-c:v", "copy",        # Copy video without re-encoding
+                "-c:a", "aac",         # Encode audio as AAC
+                "-shortest",           # End when shortest input ends
+                output_path
+            ]
+        
+        print(f"DEBUG - FFmpeg command: {' '.join(cmd)}")
+        
+        # Run FFmpeg
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        
+        if result.returncode == 0:
+            print(f"DEBUG - Successfully added background music to video")
+            return True
+        else:
+            print(f"ERROR - FFmpeg failed to add music: {result.stderr}")
+            return False
+            
+    except Exception as e:
+        print(f"ERROR - Failed to add background music: {e}")
+        return False
+    finally:
+        # Cleanup temporary files
+        if temp_dir:
+            try:
+                import shutil
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                print(f"DEBUG - Cleaned up music temp directory: {temp_dir}")
+            except:
+                pass
+
+
+@tool
+def merge_videos_with_music_tool(input_params) -> str:
+    """
+    Merge video clips and add background music to the final video.
+    
+    Args:
+        input_params: Dictionary containing:
+            - video_clips: List of video clip dictionaries or JSON string containing the clips
+            - music_url: URL of the background music file
+            - output_filename: Name for the output video file (optional)
+            - music_volume: Volume level for background music (0.0 to 1.0, default 0.3)
+    
+    Returns:
+        JSON string containing merge results and final video URLs
+    """
+    import time
+    start_time = time.time()
+    
+    try:
+        # Extract parameters from input dict
+        if isinstance(input_params, str):
+            # If it's a JSON string, parse it
+            try:
+                input_params = json.loads(input_params)
+            except json.JSONDecodeError:
+                raise ValueError(f"Invalid JSON string: {input_params}")
+        
+        if not isinstance(input_params, dict):
+            raise ValueError(f"Expected dict or JSON string, got {type(input_params)}: {input_params}")
+        
+        video_clips = input_params.get('video_clips')
+        music_url = input_params.get('music_url')
+        output_filename = input_params.get('output_filename', 'final_video_with_music.mp4')
+        music_volume = input_params.get('music_volume', 0.3)
+        
+        if not video_clips:
+            raise ValueError("video_clips is required")
+        if not music_url:
+            raise ValueError("music_url is required")
+        
+        print(f"DEBUG - Extracted parameters: video_clips={len(video_clips) if isinstance(video_clips, list) else 'string'}, music_url='{music_url}', output_filename='{output_filename}', music_volume={music_volume}")
+        # First merge videos without music
+        print(f"DEBUG - Step 1: Merging video clips")
+        merge_result_json = merge_videos_tool.invoke({
+            "video_clips": video_clips,
+            "output_filename": "temp_merged_video.mp4"
+        })
+        
+        merge_result = json.loads(merge_result_json)
+        
+        if not merge_result.get("success"):
+            return merge_result_json  # Return the error from video merging
+        
+        # Get the merged video path
+        merged_video_url = merge_result.get("final_video_url", "")
+        merged_video_path = merged_video_url.replace("file://", "") if merged_video_url.startswith("file://") else merged_video_url
+        
+        if not os.path.exists(merged_video_path):
+            return json.dumps({
+                "error": "Merged video file not found",
+                "merged_video_path": merged_video_path
+            }, indent=2)
+        
+        # Create output path for final video with music
+        temp_dir = tempfile.mkdtemp()
+        final_output_path = os.path.join(temp_dir, output_filename)
+        
+        print(f"DEBUG - Step 2: Adding background music")
+        
+        # Add background music to the merged video
+        music_success = add_background_music_to_video(
+            merged_video_path, 
+            music_url, 
+            final_output_path, 
+            music_volume
+        )
+        
+        if not music_success:
+            return json.dumps({
+                "error": "Failed to add background music to video",
+                "video_path": merged_video_path,
+                "music_url": music_url
+            }, indent=2)
+        
+        # Upload final video with music to FAL
+        fal_url = upload_video_to_fal(final_output_path)
+        
+        processing_time = time.time() - start_time
+        
+        result = MergedVideoResult(
+            success=True,
+            final_video_url=f"file://{final_output_path}",
+            fal_video_url=fal_url or "",
+            total_duration=merge_result.get("total_duration", 0),
+            total_clips=merge_result.get("total_clips", 0),
+            processing_time=processing_time
+        )
+        
+        return result.model_dump_json(indent=2)
+        
+    except Exception as e:
+        processing_time = time.time() - start_time
+        
+        result = MergedVideoResult(
+            success=False,
+            total_duration=0,
+            total_clips=0,
             processing_time=processing_time,
             error_message=str(e)
         )

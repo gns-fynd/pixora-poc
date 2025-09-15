@@ -61,7 +61,7 @@ class KlingV2Model(VideoModel):
             default_params={
                 "cfg_scale": 0.5,
                 "duration": 5,
-                "negative_prompt": ""
+                "negative_prompt": "blurry, extra limbs, off-garment, artifact, watermark, text, logo"
             }
         )
     
