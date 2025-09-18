@@ -29,19 +29,21 @@ When you receive input, it will contain a "USER CONFIGURATION" section. You MUST
 
 MAPPING RULES:
 - Image Model "Nano Banana 🍌" → model_name "nano-banana"
-- Duration "10sec" → duration_preference "10sec"
+- Image Model "Seedream" → model_name "seedream"
 - Duration "30sec" → duration_preference "30sec" 
-- Duration "1min" → duration_preference "1min"
+- Duration "60sec" → duration_preference "60sec"
 - Aspect Ratio "1:1" → aspect_ratio "1:1"
 - Aspect Ratio "9:16" → aspect_ratio "9:16"
 
-IMPORTANT: Kontext model is NOT available. Only use "nano-banana" for image generation.
-
 MODEL NAME REQUIREMENTS:
 **Model names:** Always pass `model_name` using these exact keys:
-**Images:** `nano-banana`
-**Video:** `kling-v2`
-Never use "Kontext", "Kling 1.6", or any other model names - they are not available.
+**Images:** `nano-banana` or `seedream`
+**Video:** `kling-v2` (for Kling 2.1), `kling-v2` (for Kling 1.6), `veo-3-fast`, `veo-3`
+Video model mapping:
+- "Kling 2.1" → "kling-v2"
+- "Kling 1.6" → "kling-v2" 
+- "Veo 3 Fast" → "veo-3-fast"
+- "Veo 3" → "veo-3"
 
 WORKFLOW APPROACH:
 
@@ -100,7 +102,13 @@ PHASE 3 - BACKGROUND MUSIC & FINAL ASSEMBLY:
     - video_clips: Properly formatted video clips list from step 9
     - music_url: URL from music generation result
     - music_volume: Default 0.3 (30% volume for background music)
-12. Display final video with inline player and provide download links
+12. CRITICAL - FINAL VIDEO URL DELIVERY:
+    - Extract the "fal_video_url" from the merge result
+    - ALWAYS include this URL in your final response text to the user
+    - Use a clear format like: "🎬 **Your final video is ready!** \n\n**Download/View:** [Final Video](ACTUAL_URL_HERE)"
+    - Replace ACTUAL_URL_HERE with the actual fal_video_url from the merge result
+    - This ensures the URL is visible and clickable in the Streamlit interface
+    - Display final video with inline player and provide download links
 
 MUSIC GENERATION PARAMETER REQUIREMENTS:
 - video_theme: String describing the video theme/content (NOT a JSON object)
@@ -248,6 +256,18 @@ CRITICAL CONSTRAINTS:
 2. Character consistency: Same face, body structure across ALL scenes unless user wants to change it
 3. Garment consistency: Exact same garment style, pattern, design in ALL scenes
 4. PDP images are reference only: Change backgrounds, poses, lighting freely, consider the PDP images as reference only
+
+MODEL CONSISTENCY REQUIREMENTS:
+When creating image_edit_prompt for each scene, you MUST describe and maintain these consistent elements across ALL scenes:
+- MODEL POSE & POSITIONING: Describe the model's stance, body angle, head position, and overall posture
+- FACIAL FEATURES: Describe face shape, eye color, hair style, makeup style, and expression
+- BODY STRUCTURE: Describe height, build, proportions, and physical characteristics
+- STYLE & AESTHETIC: Describe the overall visual style (modern, classic, elegant, casual, etc.)
+- COLOR GRADING: Describe the color palette, saturation, warmth/coolness, and overall mood
+- LIGHTING SETUP: Describe lighting direction, intensity, softness, and shadow characteristics
+- GARMENT FIT: Describe how the clothing fits, drapes, and falls on the model's body
+
+Each scene's image_edit_prompt must include ALL these consistency elements to ensure the same model appearance throughout the video.
 
 BACKGROUND ENHANCEMENT RULES:
 - If source images have flat, plain, or minimal backgrounds, REPLACE with thematically appropriate realistic backgrounds

@@ -92,13 +92,32 @@ class NanoBananaModel(ImageModel):
         return str(result)
 
 
+class SeedreamModel(ImageModel):
+    """Seedream model implementation (placeholder - needs actual model ID)"""
+    
+    def __init__(self):
+        super().__init__(
+            model_id="seedream/placeholder:model_hash",  # Replace with actual Seedream model ID
+            default_params={
+                "output_format": "jpg",
+                "quality": 90
+            }
+        )
+    
+    def generate_image(self, prompt: str, **kwargs) -> str:
+        """Generate image using Seedream (fallback to Nano Banana for now)"""
+        # For now, fallback to Nano Banana since Seedream model ID is not available
+        fallback_model = NanoBananaModel()
+        return fallback_model.generate_image(prompt, **kwargs)
+
+
 # Model registry for easy extension
 MODEL_REGISTRY = {
     "nano-banana": NanoBananaModel,
+    "seedream": SeedreamModel,
     # Future models can be added here:
     # "flux": FluxModel,
     # "sdxl": SDXLModel,
-    # "kontext": KontextModel,  # Removed - not working
 }
 
 
@@ -313,16 +332,24 @@ def generate_scene_images_tool(
         successful = sum(1 for img in generated_images if img.success)
         failed = len(generated_images) - successful
         
-        result = ImageGenerationResult(
-            total_scenes=len(scenes),
-            successful_generations=successful,
-            failed_generations=failed,
-            generated_images=generated_images,
-            total_time=total_time,
-            model_used=model_name
-        )
+        # Create the result with the original scene breakdown preserved
+        result_dict = {
+            "total_scenes": len(scenes),
+            "successful_generations": successful,
+            "failed_generations": failed,
+            "generated_images": [img.model_dump() for img in generated_images],
+            "total_time": total_time,
+            "model_used": model_name,
+            "scene_breakdown": {
+                "scenes": scenes,  # Preserve original scene data with durations
+                "image_paths": image_paths,
+                "total_scenes": len(scenes),
+                "aspect_ratio": aspect_ratio
+            }
+        }
         
-        return result.model_dump_json(indent=2)
+        print(f"DEBUG - Preserving scene breakdown with {len(scenes)} scenes in result")
+        return json.dumps(result_dict, indent=2)
         
     except Exception as e:
         return json.dumps({

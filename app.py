@@ -41,7 +41,7 @@ with st.sidebar:
         # Aspect ratio dropdown
         aspect_ratio = st.selectbox(
             "Aspect Ratio",
-            ["1:1", "9:16"],
+            ["9:16", "1:1"],
             index=0,
             help="Choose the aspect ratio for generated content"
         )
@@ -49,23 +49,15 @@ with st.sidebar:
         # Duration dropdown
         duration = st.selectbox(
             "Duration",
-            ["10sec", "30sec", "1min"],
+            ["30sec", "60sec"],
             index=0,
             help="Choose the duration for video content"
-        )
-        
-        # LLM selection dropdown
-        llm_option = st.selectbox(
-            "LLM",
-            ["GPT-4.0", "GPT-5 Thinking", "GPT-4.5", "Claude 4 Sonnet", "Gemini 2.5 Pro"],
-            index=0,
-            help="Choose the AI language model"
         )
         
         # Image model dropdown
         image_option = st.selectbox(
             "Image",
-            ["Kontext", "Nano Banana 🍌"],
+            ["Nano Banana 🍌", "Seedream"],
             index=0,
             help="Choose the image generation model"
         )
@@ -73,7 +65,7 @@ with st.sidebar:
         # Video model dropdown
         video_option = st.selectbox(
             "Video",
-            ["Kling 1.6", "Kling 2.1", "Veo 3"],
+            ["Kling 2.1", "Kling 1.6", "Veo 3 Fast", "Veo 3"],
             index=0,
             help="Choose the video generation model"
         )
@@ -227,7 +219,7 @@ if prompt:
                 config = {
                     "aspect_ratio": aspect_ratio,
                     "duration": duration,
-                    "llm_model": llm_option,
+                    "llm_model": "gpt-4o",  # Fixed LLM model since dropdown was removed
                     "image_model": image_option,
                     "video_model": video_option
                 }

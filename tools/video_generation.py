@@ -46,9 +46,16 @@ class VideoModel:
     def prepare_params(self, prompt: str, start_image_url: str, **kwargs) -> Dict[str, Any]:
         """Prepare parameters for the model"""
         params = self.default_params.copy()
+        # Update with kwargs first, then set required params
         params.update(kwargs)
         params["prompt"] = prompt
         params["start_image"] = start_image_url
+        
+        # Ensure duration from kwargs overrides default if provided
+        if "duration" in kwargs:
+            params["duration"] = kwargs["duration"]
+            print(f"DEBUG - Using duration from kwargs: {kwargs['duration']} seconds")
+        
         return params
 
 
@@ -60,7 +67,7 @@ class KlingV2Model(VideoModel):
             model_id="kwaivgi/kling-v2.0:03c47b845aed8a009e0f83a45be0a2100ca11a7077e667a33224a54e85b2965c",
             default_params={
                 "cfg_scale": 0.5,
-                "duration": 5,
+                "duration": 10,  # Default to 10 seconds instead of 5
                 "negative_prompt": "blurry, extra limbs, off-garment, artifact, watermark, text, logo"
             }
         )
@@ -99,6 +106,46 @@ class KlingProModel(VideoModel):
     def generate_video(self, prompt: str, start_image_url: str, **kwargs) -> str:
         """Generate video using Kling Pro (fallback to v2.0 for now)"""
         # For now, fallback to Kling v2.0 since Pro isn't available yet
+        fallback_model = KlingV2Model()
+        return fallback_model.generate_video(prompt, start_image_url, **kwargs)
+
+
+class Veo3FastModel(VideoModel):
+    """Veo 3 Fast model implementation (placeholder - needs actual model ID)"""
+    
+    def __init__(self):
+        super().__init__(
+            model_id="google/veo-3-fast:placeholder_version_hash",  # Replace with actual Veo 3 Fast model ID
+            default_params={
+                "cfg_scale": 0.5,
+                "duration": 10,
+                "negative_prompt": "blurry, low quality, distorted"
+            }
+        )
+    
+    def generate_video(self, prompt: str, start_image_url: str, **kwargs) -> str:
+        """Generate video using Veo 3 Fast (fallback to Kling v2.0 for now)"""
+        # For now, fallback to Kling v2.0 since Veo 3 Fast model ID is not available
+        fallback_model = KlingV2Model()
+        return fallback_model.generate_video(prompt, start_image_url, **kwargs)
+
+
+class Veo3Model(VideoModel):
+    """Veo 3 model implementation (placeholder - needs actual model ID)"""
+    
+    def __init__(self):
+        super().__init__(
+            model_id="google/veo-3:placeholder_version_hash",  # Replace with actual Veo 3 model ID
+            default_params={
+                "cfg_scale": 0.7,
+                "duration": 10,
+                "negative_prompt": "blurry, low quality, distorted"
+            }
+        )
+    
+    def generate_video(self, prompt: str, start_image_url: str, **kwargs) -> str:
+        """Generate video using Veo 3 (fallback to Kling v2.0 for now)"""
+        # For now, fallback to Kling v2.0 since Veo 3 model ID is not available
         fallback_model = KlingV2Model()
         return fallback_model.generate_video(prompt, start_image_url, **kwargs)
 
@@ -289,11 +336,12 @@ def generate_scene_videos_tool(
                         print(f"DEBUG - Found images in key: {key}")
                         generated_images = [{"scene_id": i+1, "image_url": item.get("image_url"), "success": True}
                                           for i, item in enumerate(value) if item.get("image_url")]
-                        # Create default scenes
+                        # Create default scenes - this should rarely happen if data flow is correct
                         scenes = [{"scene_id": i+1,
                                  "video_animation_prompt": f"Smooth camera movement for scene {i+1}",
-                                 "duration": 5}
+                                 "duration": 5}  # Fallback duration - should use actual scene breakdown
                                 for i in range(len(generated_images))]
+                        print(f"WARNING - Created {len(scenes)} fallback scenes - scene breakdown data may be missing")
                         break
 
         if not generated_images:
