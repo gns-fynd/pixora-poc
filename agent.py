@@ -94,8 +94,7 @@ class PixoraVideoAgent:
             verbose=verbose,
             handle_parsing_errors="Check your output and make sure to follow the format! Always end with either Action: or Final Answer:",
             max_iterations=15,  # Reduced to prevent infinite loops
-            max_execution_time=1000,  # 5 minutes timeout
-            early_stopping_method="generate"  # Stop early if possible
+            max_execution_time=1000  # 5 minutes timeout
         )
     
     def _create_react_prompt(self) -> PromptTemplate:
